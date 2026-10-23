@@ -194,7 +194,7 @@ const Repo={
     const s=await this.store.all();
     this.cats=(s&&s.cats)||defCats();this.wallets=(s&&s.wallets&&s.wallets.length&&s.wallets)||defWallets();
     this.settings={currency:'IDR',theme:'auto',...((s&&s.settings)||{})};
-    this.mt=(s&&s.mt)||0;this.items=s?s.items:seed();['budgets','goals','bills','shop'].forEach(k=>this[k]=(s&&s[k])||[]);this.normalize();await this.persist(true);
+    this.mt=(s&&s.mt)||0;this.items=s?s.items:[];['budgets','goals','bills','shop'].forEach(k=>this[k]=(s&&s[k])||[]);this.normalize();await this.persist(true);
   },
   normalize(){this.items.forEach(t=>{
     if(!t.categoryId&&t.type!=='transfer')t.categoryId=t.type+'-'+String(t.category||'lainnya').toLowerCase();
@@ -353,7 +353,7 @@ const MORE=[
 ];
 /* Info pembuat (tampil di bawah menu Lainnya). Isi ig dan wa; kosongkan kalau tidak ingin ditampilkan.
    ig: username Instagram, wa: nomor WhatsApp (boleh 08xxx atau 628xxx) */
-const CREATOR={name:'Rifqi Hisyammuddin',email:'rifqihisyammuddin429@gmail.com',ig:'rifsy_am17',wa:'083125775479'};
+const CREATOR={name:'Rifqi Hisyammuddin',email:'rifqihisyammuddin429@gmail.com',ig:'rifsy_am',wa:'083125775479'};
 function creatorHtml(){
   const c=CREATOR,L=[];
   if(c.email)L.push(`<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>`);
@@ -401,8 +401,10 @@ const numIn=id=>parseInt(($(id).value||'').replace(/\D/g,''),10)||0;
 const monthSpent=cid=>stats(monthKey(today())).list.filter(t=>t.type==='out'&&t.categoryId===cid).reduce((a,t)=>a+t.amount,0);
 function overBudget(t){const b=t.type==='out'&&Repo.budgets.find(x=>x.categoryId===t.categoryId);if(!b)return '';
   const sp=monthSpent(b.categoryId),n=catOf(t).name;return sp>b.limit?'Anggaran '+n+' terlewati':sp>=b.limit*.8?'Anggaran '+n+' hampir habis':''}
-const dueInfo=b=>{const n=new Date(),paid=(b.paid||[]).includes(monthKey(today())),dim=new Date(n.getFullYear(),n.getMonth()+1,0).getDate(),d=Math.min(b.day,dim)-n.getDate();
-  return paid?{t:'Lunas bulan ini',c:'#1f7a63',o:3}:d<0?{t:'Terlambat '+(-d)+' hari',c:'#d64545',o:0,u:1}:d===0?{t:'Jatuh tempo hari ini',c:'#e08a22',o:1,u:1}:{t:d+' hari lagi',c:d<=3?'#e08a22':'var(--mute)',o:2,u:d<=3}};
+const fd=s=>parse(s).toLocaleDateString('id-ID',{day:'numeric',month:'long',year:'numeric'});
+const debtRemain=b=>Math.max(0,(b.amount||0)-(b.payments||[]).reduce((t,x)=>t+(x.amt||0),0));
+const dueInfo=b=>{const n=new Date(),deb=Array.isArray(b.payments),paid=deb?debtRemain(b)<=0:(b.paid||[]).includes(monthKey(today())),dim=new Date(n.getFullYear(),n.getMonth()+1,0).getDate(),d=b.due?Math.round((parse(b.due)-parse(today()))/864e5):Math.min(b.day,dim)-n.getDate();
+  return paid?{t:deb?'Lunas':'Lunas bulan ini',c:'#1f7a63',o:3}:d<0?{t:'Terlambat '+(-d)+' hari',c:'#d64545',o:0,u:1}:d===0?{t:'Jatuh tempo hari ini',c:'#e08a22',o:1,u:1}:{t:d+' hari lagi',c:d<=3?'#e08a22':'var(--mute)',o:2,u:d<=3}};
 function viewBudget(){
   const bud=Repo.budgets.map(b=>{const c=Repo.cats.find(x=>x.id===b.categoryId)||{name:'Lainnya'},sp=monthSpent(b.categoryId),p=Math.round(sp/b.limit*100),col=p>=100?'#d64545':p>=80?'#e08a22':'#1f7a63';
     return `<div class="bar"><div class="l"><span>${esc(c.name)} <button data-delbud="${b.id}" aria-label="Hapus anggaran ${esc(c.name)}" style="color:var(--mute)">×</button></span><span>${rp(sp)} / ${rp(b.limit)}</span></div><i><u style="width:${Math.min(100,p)}%;background:${col}"></u></i><small style="color:${col}">${sp>b.limit?'Melebihi '+rp(sp-b.limit):'Sisa '+rp(b.limit-sp)} · ${p}%</small></div>`}).join('');
@@ -418,12 +420,26 @@ function viewBudget(){
   <label for="gt">Jumlah target (Rp)</label><input class="f" id="gt" data-m inputmode="numeric" placeholder="0"><button class="cta" data-addgoal>Tambah target</button></div>
   <p class="note">Setoran tabungan dicatat terpisah dan tidak mengubah saldo dompet.</p>`;
 }
+function billCard(b,i){
+  const debt=Array.isArray(b.payments),rem=debtRemain(b),paidAmt=(b.amount||0)-rem,lunas=rem<=0;
+  if(!debt)return `<div class="row"><span class="t">${esc(b.name)}<small style="color:${i.c}">Tiap tanggal ${b.day} · ${i.t}</small></span><span class="a">${rp(b.amount)}</span>${i.o===3?'':`<button class="chip on" data-pay="${b.id}">Lunas</button>`}<button data-delbill="${b.id}" aria-label="Hapus tagihan ${esc(b.name)}" style="color:var(--mute);font-size:20px">×</button></div>`;
+  const hist=b.payments.map(x=>`${x.date.slice(8)}/${x.date.slice(5,7)} ${rp(x.amt)}`).join(' · ');
+  return `<div class="card" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div style="min-width:0"><b style="font-size:15px">${esc(b.name)}</b>${b.address?`<p class="note" style="margin:2px 0 0">Alamat: ${esc(b.address)}</p>`:''}${(b.item||b.qty)?`<p class="note" style="margin:2px 0 0">Barang: ${esc(b.item||'-')}${b.qty?` · ${Number(b.qty).toLocaleString('id-ID')} × ${rp(b.price||0)}`:''}</p>`:''}</div><button data-delbill="${b.id}" aria-label="Hapus tagihan ${esc(b.name)}" style="color:var(--mute);font-size:20px">×</button></div>
+  ${b.date?`<p class="note" style="margin:8px 0 0">Tanggal hutang: ${fd(b.date)}</p>`:''}<p class="note" style="margin:${b.date?'2px':'8px'} 0 0">Jumlah ${rp(b.amount)} · Terbayar ${rp(paidAmt)}${lunas?'':` · Sisa <b>${rp(rem)}</b>`}</p>
+  <p style="margin:6px 0 0;font-size:13px;font-weight:600;color:${lunas?'#1f7a63':'#d64545'}">${lunas?'Lunas':'Belum lunas'}${lunas?'':`<span style="font-weight:400;color:${i.c}"> · Jatuh tempo ${b.due?fd(b.due):'tgl '+b.day} · ${i.t}</span>`}</p>
+  ${lunas?'':`<div class="search" style="margin:10px 0 0"><input class="f" id="c-${b.id}" data-m inputmode="numeric" placeholder="Cicilan (Rp)" aria-label="Cicilan ${esc(b.name)}"><button class="chip on" data-cicil="${b.id}">Cicil</button></div>`}
+  ${hist?`<p class="note" style="margin:8px 0 0">Riwayat: ${hist}</p>`:''}</div>`;
+}
 function viewBills(){
-  const l=Repo.bills.map(b=>({b,i:dueInfo(b)})).sort((x,y)=>x.i.o-y.i.o||x.b.day-y.b.day);
-  return `${BACK}<h1>Tagihan &amp; Pengingat</h1><div class="list" style="margin-top:18px">${l.map(({b,i})=>`<div class="row"><span class="t">${esc(b.name)}<small style="color:${i.c}">Tiap tanggal ${b.day} · ${i.t}</small></span><span class="a">${rp(b.amount)}</span>${i.o===3?'':`<button class="chip on" data-pay="${b.id}">Lunas</button>`}<button data-delbill="${b.id}" aria-label="Hapus tagihan ${esc(b.name)}" style="color:var(--mute);font-size:20px">×</button></div>`).join('')||'<div class="empty">Belum ada tagihan rutin.</div>'}</div>
-  <h2>Tambah tagihan</h2><div class="card"><label for="bn" style="margin-top:0">Nama</label><input class="f" id="bn" maxlength="30" placeholder="Contoh: Listrik">
-  <label for="ba">Jumlah (Rp)</label><input class="f" id="ba" data-m inputmode="numeric" placeholder="0"><label for="bd">Jatuh tempo tiap tanggal</label><input class="f" id="bd" type="number" min="1" max="31" placeholder="1–31"><button class="cta" data-addbill>Tambah tagihan</button></div>
-  <p class="note">Menandai lunas otomatis mencatat pengeluaran di dompet pertama dan menghapus pengingat bulan ini. Pengingat muncul di Beranda saat jatuh tempo 3 hari lagi atau terlewat. Notifikasi di luar aplikasi belum didukung.</p>`;
+  const l=Repo.bills.map(b=>({b,i:dueInfo(b)})).sort((x,y)=>x.i.o-y.i.o||(x.b.due||'').localeCompare(y.b.due||'')||x.b.day-y.b.day);
+  return `${BACK}<h1>Tagihan &amp; Pengingat</h1><div class="list" style="margin-top:18px">${l.map(({b,i})=>billCard(b,i)).join('')||'<div class="empty">Belum ada tagihan.</div>'}</div>
+  <h2>Tambah tagihan</h2><div class="card"><label for="bn" style="margin-top:0">Nama</label><input class="f" id="bn" maxlength="30" placeholder="Contoh: Pak Andi">
+  <label for="bad">Alamat</label><input class="f" id="bad" maxlength="80" placeholder="Contoh: Jl. Mawar No. 5">
+  <label for="bi">Nama barang</label><input class="f" id="bi" maxlength="50" placeholder="Contoh: Beras 25 kg">
+  <label for="bq">Jumlah barang</label><input class="f" id="bq" data-m inputmode="numeric" placeholder="Contoh: 5">
+  <label for="bp">Harga satuan (Rp)</label><input class="f" id="bp" data-m inputmode="numeric" placeholder="Contoh: 65.000">
+  <label>Total harga</label><div class="f amt" id="btot" style="background:var(--peach)">Rp0</div><label for="bt">Tanggal hutang</label><input class="f" id="bt" type="date" value="${today()}"><label for="bd">Tanggal jatuh tempo</label><input class="f" id="bd" type="date"><button class="cta" data-addbill>Tambah tagihan</button></div>
+  <p class="note">Ketik jumlah di kolom Cicilan lalu ketuk Cicil. Jika belum semuanya dibayar, statusnya Belum lunas dan sisanya ditampilkan. Total harga = jumlah barang × harga satuan. Jika total cicilan sudah sama dengan total harga, otomatis Lunas. Setiap cicilan otomatis tercatat sebagai pemasukan di daftar transaksi. Pengingat muncul di Beranda saat jatuh tempo 3 hari lagi atau terlewat. Notifikasi di luar aplikasi belum didukung.</p>`;
 }
 function viewItems(){
   const l=Repo.shop,sel=l.filter(x=>x.done),sum=sel.reduce((a,x)=>a+x.price,0),est=l.filter(x=>!x.done).reduce((a,x)=>a+x.price,0);
@@ -553,9 +569,18 @@ document.addEventListener('click',async e=>{
   else if(el=g('[data-delgoal]')){Repo.goals=Repo.goals.filter(x=>x.id!==el.dataset.delgoal);await Repo.persist();render()}
   else if(el=g('[data-dep]')){const a=numIn('#d-'+el.dataset.dep);if(!a){toast('Isi jumlah setoran');return}
     Repo.goals.find(x=>x.id===el.dataset.dep).saved+=a;await Repo.persist();render();toast('Setoran dicatat')}
-  else if(g('[data-addbill]')){const n=$('#bn').value.trim(),a=numIn('#ba'),d=parseInt($('#bd').value,10);
-    if(!n||!a||!(d>=1&&d<=31)){toast('Isi nama, jumlah, dan tanggal 1–31');return}
-    Repo.bills.push({id:uid(),name:n,amount:a,day:d,paid:[]});await Repo.persist();render();toast('Tagihan ditambah')}
+  else if(g('[data-addbill]')){const n=$('#bn').value.trim(),ad=$('#bad').value.trim(),it=$('#bi').value.trim(),q=numIn('#bq'),pr=numIn('#bp'),a=q*pr,dt=$('#bt').value,du=$('#bd').value;
+    if(!n||!q||!pr||!dt||!du){toast('Isi nama, jumlah barang, harga satuan, tanggal hutang, dan jatuh tempo');return}
+    if(du<dt){toast('Jatuh tempo tidak boleh sebelum tanggal hutang');return}
+    Repo.bills.push({id:uid(),name:n,address:ad,item:it,qty:q,price:pr,amount:a,date:dt,due:du,day:parseInt(du.slice(8),10),payments:[],paid:[]});await Repo.persist();render();toast('Tagihan ditambah')}
+  else if(el=g('[data-cicil]')){const b=Repo.bills.find(x=>x.id===el.dataset.cicil);if(!b)return;
+    let a=numIn('#c-'+b.id);if(!a){toast('Isi jumlah cicilan');return}
+    const rem=debtRemain(b),over=a>rem;if(over)a=rem;
+    b.payments.push({id:uid(),amt:a,date:today()});
+    const ic=catsOf('in').find(x=>x.id==='in-lainnya')||catsOf('in')[0];
+    if(ic)await Repo.upsert({id:uid(),type:'in',amount:a,categoryId:ic.id,walletId:Repo.wallets[0].id,note:'Cicilan '+b.name+(b.item?' - '+b.item:''),date:today(),createdAt:Date.now()});
+    await Repo.persist();render();
+    toast(debtRemain(b)<=0?(over?'Lunas! Kelebihan tidak dicatat':'Lunas!'):'Cicilan dicatat, sisa '+rp(debtRemain(b)))}
   else if(el=g('[data-pay]')){const b=Repo.bills.find(x=>x.id===el.dataset.pay),c=catsOf('out').find(x=>x.id==='out-tagihan')||catsOf('out')[0];
     b.paid=[...(b.paid||[]),monthKey(today())];
     await Repo.upsert({id:uid(),type:'out',amount:b.amount,categoryId:c.id,walletId:Repo.wallets[0].id,note:b.name,date:today(),createdAt:Date.now()});render();toast('Lunas, tercatat sebagai pengeluaran')}
@@ -590,6 +615,7 @@ document.addEventListener('click',async e=>{
 document.addEventListener('input',e=>{
   if(e.target.id==='q'){S.q=e.target.value;render()}
   if(e.target.id==='fa'||e.target.id==='wi'||e.target.hasAttribute('data-m')){const n=e.target.value.replace(/\D/g,'');e.target.value=n?Number(n).toLocaleString('id-ID'):''}
+  if(e.target.id==='bq'||e.target.id==='bp'){const t=$('#btot');if(t)t.textContent=rp(numIn('#bq')*numIn('#bp'))}
 });
 /* ===== Akun (lokal, tanpa verifikasi) =====
    Akun disimpan di perangkat: nama lengkap + hash kata sandi. Data tiap akun terpisah. */
@@ -624,6 +650,8 @@ const Sync={
     const r=await fetch(SUPABASE_URL.replace(/\/+$/,'')+'/rest/v1/'+SB_TABLE+path,{...opt,headers:h});
     if(!r.ok){const e=new Error(await r.text().catch(()=>'')||'HTTP '+r.status);e.status=r.status;throw e}
     const tx=await r.text();return tx?JSON.parse(tx):null},
+  async ownerFor(n,p){return(await hashPw(n.trim().toLowerCase()+'\u0000'+p,'catatuang-sb')).slice(0,40)},
+  async exists(o){const f=encodeURIComponent('*"o":"'+o+'"*'),r=await this.api('?select=id&keterangan=like.'+f+'&limit=1');return !!(r&&r.length)},
   async fetchAll(o){const f=encodeURIComponent('*"o":"'+o+'"*'),out=[];
     for(let n=0;;n+=1000){const r=await this.api('?select=id,keterangan&keterangan=like.'+f+'&order=id.asc&limit=1000&offset='+n);
       out.push(...r);if(r.length<1000)break}
@@ -639,7 +667,7 @@ const Sync={
     if(!this.on()||!Auth.user){this.set('off');return}
     this.bind();
     const sk='catatuang:sbowner:'+Auth.user.id;
-    if(this.pw){this.owner=(await hashPw(Auth.user.name.trim().toLowerCase()+'\u0000'+this.pw,'catatuang-sb')).slice(0,40);this.pw=null;try{localStorage.setItem(sk,this.owner)}catch(e){}}
+    if(this.pw){this.owner=await this.ownerFor(Auth.user.name,this.pw);this.pw=null;try{localStorage.setItem(sk,this.owner)}catch(e){}}
     else if(!this.owner){try{this.owner=localStorage.getItem(sk)}catch(e){}}
     if(!this.owner)return this.set('login','Keluar lalu masuk lagi untuk mengaktifkan sinkron.');
     if(!navigator.onLine){this.set('wait','Offline. Akan sinkron otomatis saat online.');return}
@@ -712,7 +740,14 @@ const Auth={
       if(!L.length)migrateLegacy('catatuang:u:'+a.id);
       L.push(a);this.save(L);return this.enter(a);
     }
-    const a=L.find(x=>x.name.toLowerCase()===k);
+    let a=L.find(x=>x.name.toLowerCase()===k);
+    if(!a&&Sync.on()){
+      if(!navigator.onLine)return err('Akun belum ada di HP ini. Hubungkan internet untuk masuk dengan akun dari HP lain.');
+      $('#aerr').textContent='Memeriksa akun…';
+      try{if(await Sync.exists(await Sync.ownerFor(n,p))){const salt=uid();a={id:uid(),name:n,salt,hash:await hashPw(p,salt)};L.push(a);this.save(L);Sync.pw=p;return this.enter(a)}}
+      catch(e){return err('Tidak bisa terhubung ke server. Coba lagi.')}
+      return err('Nama atau kata sandi salah.');
+    }
     if(!a||a.hash!==await hashPw(p,a.salt))return err('Nama atau kata sandi salah.');
     Sync.pw=p;this.enter(a);
   },
